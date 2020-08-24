@@ -1,0 +1,1036 @@
+---
+title: ''
+author: ''
+date: ''
+output:
+  word_document:
+    reference_docx: style.1.docx
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+
+ knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, 
+                        fig.width  = 6 * 1.67, fig.height = 6)
+
+# source("scripts/data.R")
+
+  load("cleaned.RData")
+  source("scripts/functions.R")
+  
+  library(pander)
+  library(RColorBrewer)
+  library(viridis)
+
+# Visite 
+# 0 - Enroll
+# 1 - Day 0
+# 2 - 7
+# 3 - 14
+# 4 - 28
+# 5 - mo 3  
+# 101 etc - Samples sent post-enrollment, but before the first eligible exacerbation.   
+
+```
+
+
+```{r}
+# 1  scrv 1  screen visit
+# 2  gmut 2  cf genotyping
+# 3  incl 3  inclusion_exclusion
+# 4  pee  4  pulmonary exacerbation evaluation
+# 5  demo 5  demographic_data
+# 6  ahis 6  allergy
+# 7  phe  7  physical_exam
+# 8  vsg  8  vital signs
+# 9  msh  9  medical_history_status
+# 10 ccm  10 con meds
+# 11 labo 12 blood_labs
+# 12 dail 13 cf_symptom_diary
+# 13 ystd 14 year1_study_data
+# 14 der  17 sae1
+# 15 sbl  18 sibling form
+# 16 ae   19 adverse event form
+# 17 cfq3 22 cfqr
+# 18 rand 15 randomization form
+# 19 rsam 16 report sample form
+# 20 bas  20 belfast analysis form
+# 21 rcm  21 results consensus panel
+# 22 sae  23 sae
+# 23 mbt  24 microbiome treatment
+# 24 dexc 25 day 0 exacerbation criteria
+# 25 scrf 26 screen failure
+# 26 unsc 27 unschedule vist inclusion criteria
+# 27 esq  28 end of study
+
+```
+
+Regarding the issue of which baseline FEV to use (enrollment, which was used to stratify the randomization; or the most recent planned FEV value prior to the first exacerbation), it doesn't make a difference. Some direct comparisons are below, but this is basically the reason why it doesn't matter with respect to the trial endpoints:
+
+```{r}
+
+# Compare the two FEV measures, to demonstrate that it doesn't matter which one
+# we use. 
+
+  df <- filter(vsg, intrial == "Yes") %>%
+  select(arm, baseline_fev, recent_fev) %>%
+  distinct() 
+
+  ggplot(df, aes(x = baseline_fev, y = recent_fev, color = arm)) +
+    geom_point() +
+    scale_color_viridis("", discrete = TRUE, end = 0.7) +
+    theme_minimal()
+
+```
+
+Correlation = `r round(boot::corr(cbind(df$baseline_fev, df$recent_fev)), 2)`
+
+## Timing of VSG data
+
+Patients who entered the trial
+```{r}
+
+  filter(vsg, intrial == "Yes" & visit_type != "In-trial") %>%
+  ggplot(aes(x = datvis, y = interaction(centre, patient), 
+             group = interaction(centre, patient))) +
+     geom_point(aes(color = visit_type), size = 0.6, alpha = 0.8) +
+     geom_line(alpha = 0.1, size = 0.2) +
+     scale_color_brewer("Visit Type", palette = "Set1") +
+     theme_minimal() +
+     facet_wrap(~centre) +
+     theme(panel.grid = element_blank(), 
+           axis.text.y = element_blank()) +
+     ylab("") +
+     xlab("Visit Date")
+
+ ggsave("plots/report/intrial_timelines.pdf", device = "pdf", 
+         scale = 0.6, units = "cm", 
+         width = 33.87, height = 19.05, dpi = 600)
+     
+
+```
+
+Patients who did not enter the trial
+```{r}
+
+  filter(vsg, intrial == "No" & visit_type != "In-trial") %>%
+  ggplot(aes(x = datvis, y = interaction(centre, patient), 
+             group = interaction(centre, patient))) +
+     geom_point(aes(color = visit_type)) +
+     geom_line(alpha = 0.1) +
+     scale_color_brewer("Visit Type", palette = "Set1") +
+     theme_minimal() +
+     facet_wrap(~centre) +
+     theme(panel.grid = element_blank(), 
+           axis.text.y = element_blank()) +
+     ylab("") +
+     xlab("Visit Date")
+     
+
+```
+## Results
+
+Recruitment took place from `r min(arms$allocation_date)` to `r max(arms$allocation_date)`. Over this period, `r nrow(arms)` patients were recruited and consented onto the CFMATTERS trial, with 111 randomized to the control arm and 112 to the active arm (see S-Table 1 for centre specific recruitment). 
+
+### S-Figure 1. Patient enrollment by centre (n = `r nrow(arms)`)
+
+```{r}
+
+  arrange(arms, centre, allocation_date) %>%
+    group_by(centre) %>%
+    mutate(count = 1, cummulative = cumsum(count)) %>%
+    ungroup() %>%
+  ggplot(aes(y = cummulative, x = allocation_date, color = factor(centre))) +
+    geom_step(size = 1) +
+    scale_color_brewer("", palette = "Set1") +
+    ylab("Number of patients") +
+    xlab("Date of randomization") +
+    theme_minimal()
+
+  ggsave("plots/report/recruitment_rates.pdf", device = "pdf", 
+         scale = 0.6, units = "cm", 
+         width = 33.87, height = 19.05, dpi = 600)
+
+```
+
+`r table(arms$intrial)["Yes"]` of these patients then went on to experience an eligible exacerbation (median time to eligible exacerbation was 125 days post-randomization; see S-Figure 2) and thus entered the analytical sample (day 0; n = 83 and 66, control vs active). 
+
+### S-Figure 2. Time to first exacerbation (n = 223)
+
+```{r}
+
+  enroll <- filter(vsg, visite == 0) %>%
+    select(patient, centre, visite, datvis) %>%
+    rename(enroll_date = datvis, enroll_visit = visite)
+  eligex <- filter(vsg, visite == 1) %>%
+    select(patient, centre, visite, datvis) %>%
+    rename(eligex_date = datvis, eligex_visit = visite)
+  inelex <- filter(vsg, visite == 10) %>%
+    select(patient, centre, visite, datvis) %>%
+    rename(inelex_date = datvis, inelex_visit = visite)
+
+  times <- full_join(enroll, eligex, by = c("patient", "centre")) %>%
+    full_join(inelex, by = c("patient", "centre"))
+
+# Calcuate the relevant times
+  times$time.to.eligex <- times$eligex_date - times$enroll_date
+  times$time.to.inelex <- times$inelex_date - times$enroll_date
+
+# Combine with arms, and relevant vsg information
+  times <- left_join(times, arms, by = c("centre", "patient"))
+
+# times.long <- filter(vsg, visite == 0 | visite == 1 | visite == 101)
+#
+# times.long <- full_join(times.long, select(times, patient, centre, enroll_date))
+#
+# mutate(times.long, patient = reorder(factor(patient), enroll_date)) %>%
+# ggplot(aes(x = datvis, y = patient, group = patient,
+#                        color = factor(visite))) +
+#   geom_line(color = "grey", alpha = 0.5) +
+#   geom_point() +
+#   facet_wrap(~centre) +
+#   scale_color_viridis(discrete = TRUE)
+
+# summary(times$time.to.eligex)
+#
+  select(times, arm, patient, centre, time.to.eligex, time.to.inelex) %>%
+    gather(time, value, time.to.eligex:time.to.inelex) %>%
+    mutate(time = factor(time, levels = c("time.to.eligex", "time.to.inelex"),
+                         labels = c("Eligible", "Ineligible"))) %>%
+  ggplot(aes(x = time, y = value)) +
+    geom_boxplot() +
+    geom_beeswarm(alpha = 0.7) +
+    geom_hline(yintercept = 42, color = "red") +
+    ylab("Days") +
+    xlab("") +
+    ggtitle("") +
+    scale_y_continuous(breaks = c(0, 42, seq(100, 600, by = 100))) +
+    theme_minimal()
+
+  ggsave("plots/report/time.exacerbate.pdf", device = "pdf", 
+         scale = 0.6, units = "cm", 
+         width = 33.87, height = 19.05, dpi = 600)
+```
+
+Of these, 135 patients had outcomes measured at +7 days; 144 at +14 days; 129 at +28 days; and 131 at +3 months (patient numbers by centre or arm across visits are given in S-Tables 1 and 2). 
+
+### S-Table 1. Patient numbers by centre and visit
+
+```{r}
+# Numbers by visit
+
+  df1 <- filter(vsg, !is.na(visite2)) %>%
+  rename(Visit = visite2) %>%
+  group_by(Visit) %>%
+    summarise(Total = n()) 
+
+  target <- levels(vsg$centre)
+  for(i in target){
+    df <- filter(vsg, centre == i & !is.na(visite2)) %>% 
+      rename(Visit = visite2) %>% 
+      group_by(Visit) %>%
+      summarise(N = n())
+    names(df)[2] <- i
+    df1 <- full_join(df1, df, by = "Visit")
+  }
+  
+  knitr::kable(df1)
+
+```
+
+### S-Table 2. Patient numbers by arm and visit
+
+```{r}
+# Numbers by visit
+
+  df1 <- filter(vsg, !is.na(visite2)) %>%
+  rename(Visit = visite2) %>%
+  group_by(Visit) %>%
+    summarise(Total = n()) 
+
+  target <- levels(vsg$arm)
+  for(i in target){
+    df <- filter(vsg, arm == i & !is.na(visite2)) %>% 
+      rename(Visit = visite2) %>% 
+      group_by(Visit) %>%
+      summarise(N = n())
+    names(df)[2] <- i
+    df1 <- full_join(df1, df, by = "Visit")
+  }
+  
+  knitr::kable(df1)
+
+```
+
+
+Patient characteristics for the analytical sample are given in Table 1 (characteristics for the total sample of randomized patients are given in S-Table 1). The active arm had a disproportionate number of female patients (64 vs 42%) but otherwise the two arms were similar in their distributions of key covariates at baseline. 
+
+### Table 1. Patient characteristics on day 0 (first eligible exacerbation post-randomization) in the analytical sample (n = `r table(arms$intrial)["Yes"]`)
+
+```{r}
+
+  table.1.data <-
+    filter(vsg, visite == 1) %>%
+    select(baseline_fev,
+           FEV = fev1.pct.pred2, 
+           recent_fev,
+           Age = age.,
+           Sex = gender., Weight = weight..without.shoes..,
+           Height = height..without.shoes.., arm, patient, centre) %>%
+    mutate(Height = as.numeric(Height),
+           Weight = as.numeric(Weight),
+           Age = as.numeric(Age),
+           BMI = Weight / (Height / 100)^2,
+           Sex = factor(Sex, labels = c("Males", "Females"))) %>%
+    # full_join(select(demo, centre, patient, Alcohol = alcohol, 
+    #                  Smoking = smoking.history), 
+    #           by = c("centre", "patient")) %>%
+  # full_join(select(post_ex, centre, patient, Orkambi), 
+  #           by = c("centre", "patient")) %>%
+  full_join(filter(arms, intrial == "Yes") %>%
+              select(centre, patient, Ivacaftor = ivacaftor),
+              by = c("centre", "patient")) %>%
+     select(arm, everything(), - centre, - patient) 
+
+# Put it all together
+
+  all <- data_frame(Variable = name.1(table.1.data),
+                        Obs   = n.miss(table.1.data),
+                        col2 = summary.1(table.1.data))
+
+  x1 <- filter(table.1.data, arm == "Control") 
+  control <- data_frame(Variable = name.1(x1),
+                        Obs   = n.miss(x1),
+                        col2 = summary.1(x1))
+
+  x2 <- filter(table.1.data, arm == "Active") 
+  active <- data_frame(Variable = name.1(x2),
+                       Obs   = n.miss(x2),
+                       col2 = summary.1(x2))
+
+  table1 <- full_join(all, control, by = "Variable") %>%
+            full_join(active, by = "Variable") %>%
+            mutate(test = tests.2(table.1.data, arm)) 
+  
+  names(table1) <- c("Variable", "N", "Total", "N", "Control", "N", "Active", 
+                     "Test p-value")
+
+  library(pander)
+  knitr::kable(table1[c(4:nrow(table1)), ])
+
+```
+
+### S-Table 3. Patient characteristics at enrollment (total sample n = `r nrow(arms)`)
+
+```{r}
+
+  table.1b.data <-
+    filter(vsg, visite == 0) %>%
+    select(baseline_fev,
+           Age = age.,
+           Sex = gender., Weight = weight..without.shoes..,
+           Height = height..without.shoes.., arm, patient, centre) %>%
+    mutate(Height = as.numeric(Height),
+           Weight = as.numeric(Weight),
+           Age = as.numeric(Age),
+           BMI = Weight / (Height / 100)^2,
+           Sex = factor(Sex, labels = c("Males", "Females"))) %>%
+    # full_join(select(demo, centre, patient, Alcohol = alcohol, 
+    #                  Smoking = smoking.history), 
+    #           by = c("centre", "patient")) %>%
+  # full_join(select(post_ex, centre, patient, Orkambi), 
+  #           by = c("centre", "patient")) %>%
+    full_join(select(arms, centre, patient, Ivacaftor = ivacaftor), 
+              by = c("centre", "patient")) %>%
+     select(arm, everything(), - centre, - patient) 
+
+# Put it all together
+
+  all <- data_frame(Variable = name.1(table.1b.data),
+                        Obs   = n.miss(table.1b.data),
+                        col2 = summary.1(table.1b.data))
+
+  x1 <- filter(table.1b.data, arm == "Control") 
+  control <- data_frame(Variable = name.1(x1),
+                        Obs   = n.miss(x1),
+                        col2 = summary.1(x1))
+
+  x2 <- filter(table.1b.data, arm == "Active") 
+  active <- data_frame(Variable = name.1(x2),
+                       Obs   = n.miss(x2),
+                       col2 = summary.1(x2))
+
+  table1b <- full_join(all, control, by = "Variable") %>%
+             full_join(active, by = "Variable") %>% 
+             mutate(test = tests.2(table.1b.data, arm)) 
+  
+  names(table1b) <- c("Variable", "N", "Total", "N", "Control", "N", "Active", 
+                     "Test p-value")
+
+  library(pander)
+  knitr::kable(table1b[c(4:nrow(table1b)), ])
+
+```
+
+Allele frequencies are given in Table 2. 
+
+### Table 2. First allele frequency
+```{r}
+  
+  a1 <- select(gmut, allele = allele.1, n1) %>%
+    distinct()
+
+  a2 <-  select(gmut, allele = allele.2, n2) %>%
+    distinct()
+  
+  alleles <- full_join(a1, a2, by = "allele") %>%
+    arrange(desc(n1))
+  
+  names(alleles) <- c("Allele", "N with first", "N with second")
+
+  knitr::kable(alleles)
+
+```
+
+Mean FEV1% was similar for each arm across all time-points (Figure 1; see S-Figure 2 for the full distributions of FEV1% by arm and time-point). The mean difference in FEV1% at +7 days, comparing active to control, was -1.27 (95% CI -4.37 to 1.83; p = 0.42). There were no apparent differences in FEV1% at any other time-points (see Table 3 for covariate adjusted results, and S-Table 4 for unadjusted results).
+
+### Figure 1. Means (SDs) for FEV1%, by trial arm and time-point
+
+```{r}
+  filter(vsg, intrial == "Yes" & !is.na(visite2)) %>%
+    group_by(visite2, arm) %>%
+    filter(!is.na(arm)) %>%
+    summarise(n = n(),
+              mean = mean(fev1.pct.pred2, na.rm = 2),
+              sd = sd(fev1.pct.pred2, na.rm = TRUE)) %>%
+    mutate(Mean = round(mean, 2), se = sd/sqrt(n),
+           ul = round(mean + sd, 2), ll = round(mean - sd, 2),
+           effect = paste0(Mean, " (", ll, " to ", ul, ")")) %>%
+    ggplot(aes(x = visite2, y = mean, ymax = ul, ymin = ll,
+               color = arm, group = arm)) +
+    geom_pointrange(size = 1, position = position_dodge(width = 0.1)) +
+    geom_line(position = position_dodge(width = 0.1)) +
+    scale_color_brewer("", palette = "Set1") +
+    ylab("Mean FEV1% (SDs)") +
+    xlab("")  +
+    theme_minimal()
+
+  ggsave("plots/report/fevmeans.pdf", device = "pdf", 
+         scale = 0.6, units = "cm", 
+         width = 33.87, height = 19.05, dpi = 600)
+
+```
+
+```{r}
+
+ fev_n <- filter(vsg, intrial == "Yes" & !is.na(visite2)) %>%
+    group_by(visite2, arm) %>%
+    filter(!is.na(arm)) %>%
+    summarise(n = n())
+
+```
+
+
+### S-Figure 3. Distribution of FEV1%, by arm and time-point
+
+```{r}
+
+# filter(vsg, intrial == "Yes" & !is.na(visite2)) %>%
+#   filter(!is.na(arm)) %>%
+# ggplot(aes(x = visite2, y = fev1.pct.pred2, color = factor(arm),
+#            group = interaction(centre, patient))) +
+#   geom_line(size = 1, alpha = 0.4) +
+#   scale_color_brewer("", palette = "Set1") +
+#   theme_minimal() +
+#   theme(panel.grid = element_blank()) +
+#   ylab("FEV1 % predicted") +
+#   xlab("") +
+#   ggtitle("")
+# 
+# ggsave("plots/report/fev.pdf", width = 15, height = 15 /  1.61, units = "cm",
+#        scale = 1)
+
+  filter(vsg, intrial == "Yes" & !is.na(visite2)) %>%
+    filter(!is.na(arm)) %>%
+  ggplot(aes(x = fev1.pct.pred2, fill = factor(arm), color = factor(arm))) +
+    geom_density(alpha = 0.5) +
+    geom_rug() +
+    scale_color_brewer("", palette = "Set1") +
+    scale_fill_brewer("", palette = "Set1") +
+    theme_minimal() +
+    theme(panel.grid = element_blank()) +
+    facet_wrap(~visite2) +
+    xlab("FEV1%") +
+    ylab("Density")
+
+  ggsave("plots/report/fev2.pdf", device = "pdf", 
+         scale = 0.6, units = "cm", 
+         width = 33.87, height = 19.05, dpi = 600)
+
+```
+
+### Table 3. Model-estimated (covariate adjusted) treatment effect on mean FEV1%, at each time-point
+
+```{r}
+
+  library(broom)
+  models <- list(); k <- 1
+
+  for(i in c("+28 days", "+14 days", "+7 days", "3 months")){
+    
+    df <- select(vsg, patient, centre, stratification, arm, gender., age., 
+                visite2, intrial,
+                fev = fev1.pct.pred2, baseline_fev) %>%
+      filter(!is.na(arm)) %>%
+      filter(visite2 == i & intrial == "Yes")  %>%
+      select(-visite2, -intrial)
+
+    models[[k]] <- tidy(lm(fev ~ baseline_fev + arm + factor(centre) + gender. + age., 
+                           data = df)) %>%
+                     filter(term == "armActive") %>%
+                     mutate(Effect = paste0(round(estimate, 2), " (",
+                                            round(estimate - 1.96*std.error, 2),
+                                            " to ",
+                                            round(estimate + 1.96*std.error, 2),
+                                            ")"),
+                            P = round(p.value, 2)) %>%
+                     select(Effect, P) %>%
+                     mutate(visite2 = i)
+    k <- k + 1
+  }
+
+  fev_models <- do.call(rbind, models)
+
+
+  library(pander)
+  
+  filter(vsg, intrial == "Yes" & !is.na(visite2) & !is.na(arm)) %>%
+    group_by(visite2, arm) %>%
+    summarise(n = n(),
+              mean = mean(fev1.pct.pred2, na.rm = TRUE),
+              sd = sd(fev1.pct.pred2, na.rm = TRUE)) %>%
+    mutate(Mean = round(mean, 2), se = sd/sqrt(n),
+           ul = round(mean + sd, 2), ll = round(mean - sd, 2),
+           estimate = paste0(Mean, " (", ll, " to ", ul, ")")) %>%
+    full_join(fev_models, by = "visite2") %>%
+    select(Visit = visite2, Arm = arm, Mean = estimate, Effect, P) %>%
+    pander()
+
+# stargazer(type = "html",
+#           summary = FALSE,
+#           out = "fevs.htm",
+#           digits = 2, rownames = FALSE)
+```
+Note: Reported estimates of effect size are from linear regression models with  adjustment for centre, sex, age, and FEV1% at enrollment. 
+
+Model with the "most recent" pre-day 0 FEV value
+```{r}
+
+  models <- list(); k <- 1
+
+  for(i in c("+28 days", "+14 days", "+7 days", "3 months")){
+    
+    df <- select(vsg, patient, centre, stratification, arm, gender., age., 
+                visite2, intrial,
+                fev = fev1.pct.pred2, recent_fev) %>%
+      filter(!is.na(arm)) %>%
+      filter(visite2 == i & intrial == "Yes")  %>%
+      select(-visite2, -intrial)
+
+    models[[k]] <- tidy(lm(fev ~ recent_fev + arm + factor(centre) + gender. + age., 
+                           data = df)) %>%
+                     filter(term == "armActive") %>%
+                     mutate(Effect = paste0(round(estimate, 2), " (",
+                                            round(estimate - 1.96*std.error, 2),
+                                            " to ",
+                                            round(estimate + 1.96*std.error, 2),
+                                            ")"),
+                            P = round(p.value, 2)) %>%
+                     select(Effect, P) %>%
+                     mutate(visite2 = i)
+    k <- k + 1
+  }
+
+  fev_models <- do.call(rbind, models)
+
+
+  filter(vsg, intrial == "Yes" & !is.na(visite2) & !is.na(arm)) %>%
+    group_by(visite2, arm) %>%
+    summarise(n = n(),
+              mean = mean(fev1.pct.pred2, na.rm = TRUE),
+              sd = sd(fev1.pct.pred2, na.rm = TRUE)) %>%
+    mutate(Mean = round(mean, 2), se = sd/sqrt(n),
+           ul = round(mean + sd, 2), ll = round(mean - sd, 2),
+           estimate = paste0(Mean, " (", ll, " to ", ul, ")")) %>%
+    full_join(fev_models, by = "visite2") %>%
+    select(Visit = visite2, Arm = arm, Mean = estimate, Effect, P) %>%
+    pander()
+
+# stargazer(type = "html",
+#           summary = FALSE,
+#           out = "fevs.htm",
+#           digits = 2, rownames = FALSE)
+```
+
+### S-Table 4. Model-estimated (unadjusted) treatment effect on mean FEV1%, at each time-point
+
+```{r}
+
+  library(broom)
+  models <- list(); k <- 1
+
+  for(i in c("+28 days", "+14 days", "+7 days", "3 months")){
+    a <- select(vsg, patient, centre, stratification, arm, gender., age.,
+                visite2, intrial,
+                fevbl = fev1.pct.pred2) %>%
+      filter(visite2 == "Enrollment" & intrial == "Yes") %>%
+      filter(!is.na(arm)) %>%
+      select(-visite2, -intrial)
+
+    b <- select(vsg, patient, centre, stratification, arm, gender., age., 
+                visite2, intrial,
+                fev = fev1.pct.pred2) %>%
+      filter(!is.na(arm)) %>%
+      filter(visite2 == i & intrial == "Yes")  %>%
+      select(-visite2, -intrial)
+
+    d <- full_join(a, b, by = c("patient", "centre", "stratification", "arm", "gender.", "age."))
+
+
+    models[[k]] <- tidy(lm(fev ~ arm, 
+                           data = d)) %>%
+                     filter(term == "armActive") %>%
+                     mutate(Effect = paste0(round(estimate, 2), " (",
+                                            round(estimate - 1.96*std.error, 2),
+                                            " to ",
+                                            round(estimate + 1.96*std.error, 2),
+                                            ")"),
+                            P = round(p.value, 2)) %>%
+                     select(Effect, P) %>%
+                     mutate(visite2 = i)
+    k <- k + 1
+  }
+
+  fev_models <- do.call(rbind, models)
+
+
+  library(pander)
+  
+  filter(vsg, intrial == "Yes" & !is.na(visite2) & !is.na(arm)) %>%
+    group_by(visite2, arm) %>%
+    summarise(n = n(),
+              mean = mean(fev1.pct.pred2, na.rm = TRUE),
+              sd = sd(fev1.pct.pred2, na.rm = TRUE)) %>%
+    mutate(Mean = round(mean, 2), se = sd/sqrt(n),
+           ul = round(mean + sd, 2), ll = round(mean - sd, 2),
+           estimate = paste0(Mean, " (", ll, " to ", ul, ")")) %>%
+    full_join(fev_models, by = "visite2") %>%
+    select(Visit = visite2, Arm = arm, Mean = estimate, Effect, P) %>%
+    pander()
+
+# stargazer(type = "html",
+#           summary = FALSE,
+#           out = "fevs.htm",
+#           digits = 2, rownames = FALSE)
+```
+
+Note: Reported estimates of effect size are from linear regression models with no adjustment for any covariates. 
+
+The median time to second exacerbation was 33.1 months (95%CI 25.4 to 47.9) in the control arm and 27.6 months (24 to 44.3) in the active arm (Figure 2), with a active vs control hazard ratio of 0.88 (95%CI 0.58 to 1.34; p = 0.55) estimated by Cox proportional hazards model with adjustment for centre, FEV1% at enrollment, sex, and age.
+
+### Figure 2. Survival plot for time to second exacerbation by study arm (n = 149)
+
+```{r}
+
+# Time to 2nd exacerbation
+
+  df <- filter(post_ex, intrial == "Yes") 
+  ex <- select(vsg, gender., age., patient, centre, baseline_fev, recent_fev,
+               visite2) %>%
+    filter(visite2 == "Enrollment") %>%
+    distinct(patient, centre, .keep_all = TRUE)
+  df <- left_join(
+    df, 
+    ex,
+    by = c("patient", "centre")
+  ) 
+
+# survfit(Surv(time2, event2) ~ arm, data = df)
+
+# m.3 <- cph(Surv(time2, event2) ~ arm,
+#            data = post_ex, surv = TRUE, y = TRUE, x = TRUE)
+# 
+# exp(m.3$coefficients)
+# exp(confint(m.3))
+
+  library(survminer)
+
+  ggsurvplot(survfit(Surv(time2, event2) ~ arm,
+                     data = df), conf.int = TRUE, 
+             palette = "Set1") +
+    xlab("Weeks post-treatment") +
+    ylab("Proportion who have not had a 2nd exacerbation")  
+
+
+  ggsave("plots/report/survival.pdf", device = "pdf", 
+         scale = 0.6, units = "cm", 
+         width = 33.87, height = 19.05, dpi = 600)
+
+```
+
+```{r}
+
+  
+  ddist <- datadist(df)
+
+  options(datadist = "ddist")
+
+  m.1 <- cph(Surv(time2, event2) ~ arm + baseline_fev + centre + gender. + age.,
+             data = df, surv = TRUE, y = TRUE, x = TRUE)
+
+  a <- round(exp(m.1$coefficients), 2)
+  b <- round(exp(confint(m.1)), 2)
+
+# exp(0.247 + (1.96 * 0.2773))
+# exp(0.247 - (1.96 * 0.2773))
+
+```
+
+```{r}
+
+# Same thing with the different "baseline"  
+  ddist <- datadist(df)
+
+  options(datadist = "ddist")
+
+  m.1 <- cph(Surv(time2, event2) ~ arm + recent_fev + centre + gender. + age.,
+             data = df, surv = TRUE, y = TRUE, x = TRUE)
+
+  a <- round(exp(m.1$coefficients), 2)
+  b <- round(exp(confint(m.1)), 2)
+
+# exp(0.247 + (1.96 * 0.2773))
+# exp(0.247 - (1.96 * 0.2773))
+
+```
+
+The total number of exacerbations at one year follow-up was higher in the active vs control arm (median 3 vs 2; mean 2.8 vs 2.2; Wilcox sum rank test p = 0.044; see S-Figure 4)
+
+### S-Figure 4. Total number of exacerbations at one year follow-up, by study arm (n = 128)
+
+```{r}
+
+# nrow(distinct(select(filter(oneyear, !is.na(arm) & visite == 7), patient, centre)))
+  ggplot(filter(oneyear, !is.na(arm) & visite == 7), 
+         aes(x = exacerbations, group = arm, fill = arm)) +
+    geom_bar() +
+    theme_minimal() +
+    facet_wrap(~arm, ncol = 1) +
+    theme(panel.grid = element_blank()) +
+    scale_fill_brewer(guide = FALSE, palette = "Set1") +
+    ylab("Number of patients") +
+    xlab("Number of post-tx exacerbations")
+
+  ggsave("plots/report/exacerbations.pdf", device = "pdf", 
+         scale = 0.6, units = "cm", 
+         width = 33.87, height = 19.05, dpi = 600)
+
+```
+
+```{r}
+  # group_by(filter(oneyear, !is.na(exacerbations) & visite == 7), arm) %>%
+  #   summarise(n= n(),
+  #             median = median(exacerbations, na.rm = TRUE),
+  #             mean = mean(exacerbations, na.rm = TRUE)) %>% pander()
+  # 
+  # a <- wilcox.test(exacerbations ~ arm, filter(oneyear, !is.na(arm) & visite == 7))
+
+```
+
+The total number of IV days at one year follow-up was higher in the active vs control arm (median 28 vs 42; mean 32.7 vs 40.3; Wilcox sum rank test p = 0.08; see S-Figure 5)
+
+### S-Figure 5. Total number of IV days at one year follow-up, by study arm (n = 127)
+
+```{r}
+
+ # nrow(distinct(select(filter(oneyear, !is.na(arm) & visite == 7), patient, centre)))
+  ggplot(filter(oneyear, !is.na(arm) & visite == 7), 
+         aes(x = ivs, group = arm, fill = arm)) +
+    geom_bar() +
+    theme_minimal() +
+    facet_wrap(~arm, ncol = 1) +
+    theme(panel.grid = element_blank()) +
+    scale_fill_brewer(guide = FALSE, palette = "Set1") +
+    ylab("Number of patients") +
+    xlab("Number of post-tx IV days")
+
+
+  ggsave("plots/report/ivs.pdf", device = "pdf", 
+         scale = 0.6, units = "cm", 
+         width = 33.87, height = 19.05, dpi = 600)
+
+```
+
+
+```{r}
+  # group_by(filter(oneyear, !is.na(ivs) & visite == 7), arm) %>%
+  #   summarise(n= n(),
+  #             median = median(ivs, na.rm = TRUE),
+  #             mean = mean(ivs, na.rm = TRUE)) %>% pander()
+  # 
+  # a <- wilcox.test(ivs ~ arm, filter(oneyear, !is.na(arm) & visite == 7))
+```
+
+
+
+
+```{r}
+
+# ggplot(cfqr_long, aes(color = arm, x = visite, y = value,
+#                       group  = interaction(centre, patient))) +
+#   geom_line(alpha = 0.2) +
+#   facet_wrap(~type) +
+#   theme_minimal() +
+#   scale_color_brewer("", palette = "Set1") +
+#   theme(panel.grid = element_blank(),
+#         axis.text.x = element_text(angle = 90, hjust = 1)) +
+#   xlab("") +
+#   ylab("Standardised component score")
+# 
+# ggsave("plots/report/raw_cfqr.pdf", width = 15, height = 15 /  1.61, units = "cm",
+#        scale = 1)
+
+```
+
+
+```{r}
+# library(ggjoy)
+# 
+# ggplot(cfqr_long, aes(fill = arm, y = interaction(arm, visite), x = value)) +
+#   geom_joy(alpha = 0.5) +
+#   facet_wrap(~type) +
+#   theme_minimal() +
+#   scale_fill_brewer("", palette = "Set1") +
+#   theme(panel.grid = element_blank()) +
+#   ylab("") +
+#   xlab("Standardised component score")
+# 
+# ggsave("plots/report/joy_cfqr.pdf", width = 15, height = 15 /  1.61, units = "cm",
+#        scale = 1.4)
+
+```
+
+CFQR sub-scale scores at +28 days were consistently lower in the active vs control arm, though estimates were compatible with the null-hypothesis of no difference for each of them except the Health sub-score (Figure 3; S-Figure 6).
+
+
+### Figure 3. Model-estimated differences in mean CFQR sub-scales (mean standardized scores) at day +28, by trial arm
+
+```{r}
+# To assess improvement in pulmonary symptoms and health related quality of life
+# we will use linear regression to compare symptom Burden at day 7 (for CFRSD)
+# and at 1 month (for CFQ-R) in the 2 groups adjusted for pre exacerbation FEV1
+# (as a marker of baseline pulmonary disease)
+
+
+  a <- filter(cfqr, visite == 4) %>%
+    select(patient, centre, ends_with("_s"), arm)
+  b <- filter(vsg, visite2 == "Enrollment" & intrial == "Yes") %>%
+    select(patient, centre, fev1.pct.pred2, age., gender.)
+  c <- full_join(a, b, by = c("patient", "centre"))
+  
+   Subs <- c("Body", "Digestive", "Eating", "Emotion", "Health", "Physical",
+             "Respiratory", "Role", "Social", "Treatment Burden", "Vitality",
+             "Weight")
+
+  library(purrr)
+  library(broom)
+
+  model <- function(x) tidy(lm(x ~ arm + fev1.pct.pred2 + centre + age. +
+                                 gender.,
+                               data = c))
+
+  cfqr_models <- map_df(select(c, ends_with("_s")), model) %>%
+    filter(term == "armActive") %>%
+    mutate(ul = estimate + (2 * std.error),
+           ll = estimate - (2 * std.error)) %>%
+    mutate(out = factor(names(select(c, ends_with("_s"))), labels = Subs)) %>%
+    mutate(out = reorder(out, estimate))
+
+  ggplot(cfqr_models, aes(y = estimate, ymax = ul, ymin = ll,
+                          x = out)) +
+    geom_pointrange() +
+    theme_minimal() +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+    scale_color_brewer(guide = FALSE, palette = "Set1") +
+    theme(panel.grid = element_blank()) +
+    ylab("Estimated difference in mean component score at +28 days (95%CI), 
+         Active vs. Control") +
+    xlab("") +
+    coord_flip() +
+    geom_hline(yintercept = -4, linetype = "dashed", color = "red") +
+    scale_y_continuous(breaks = c(-20, -10, -4, 0, 4))
+
+  ggsave("plots/report/cfqr_models.pdf", device = "pdf", 
+         scale = 0.6, units = "cm", 
+         width = 33.87, height = 19.05, dpi = 600)
+```
+
+Note: Reported estimates of effect size are from linear regression models with adjustment for FEV1% at enrollment, centre, age, and sex. 
+
+### S-Figure 6. CFQR means (SDs) by study arm and time point
+
+```{r}
+  a <- filter(cfqr, visite < 6) %>%
+       mutate(visite2 = factor(visite, labels = levels(vsg$visite2)[c(1:2, 4:6)]))
+
+  means_list <- list(); k <- 1
+
+  for(i in levels(a$visite2)){
+    for(j in names(a)[78:89]){
+      df1 <- filter(a, visite2 == i, arm == "Active")[j]
+      df1 <- as.data.frame(df1[complete.cases(df1), ])
+      df2 <- filter(a, visite2 == i, arm == "Control")[j]
+      df2 <- as.data.frame(df2[complete.cases(df2), ])
+
+      active <- data_frame(mean = mean(df1[[1]], na.rm = TRUE),
+                           sd   = sd(df1[[1]], na.rm = TRUE),
+                           n    = length(df1[[1]]),
+                           se   = sd / sqrt(n - 1),
+                           arm = "Active")
+      contrl <- data_frame(mean = mean(df2[[1]], na.rm = TRUE),
+                           sd   = sd(df2[[1]], na.rm = TRUE),
+                           n    = length(df2[[1]]),
+                           se   = sd / sqrt(n - 1),
+                           arm  = "Control")
+
+      means_list[[k]] <- rbind(active, contrl) %>%
+        mutate(visite2 = i, var = j)
+
+      k <- k + 1
+
+    }
+  }
+
+
+  means <- do.call(rbind, means_list)
+  
+   Subs <- c( "Body", "Digestive", "Eating", "Emotion", "Health", "Physical",
+             "Respiratory", "Role", "Social", "Treatment Burden", "Vitality",
+             "Weight")
+
+  means <- mutate(means, ul = mean + sd, ll = mean - sd,
+                  variable = factor(var, labels = Subs),
+                  time = factor(visite2, levels = levels(a$visite2)), 
+                  arm = factor(arm, levels = c("Control", "Active")))
+
+  ggplot(means, aes(x = time, y = mean, ymin = ll, ymax = ul, color = arm,
+                    group = arm)) +
+    geom_line() +
+    geom_pointrange(alpha = 0.5, size = 0.5) +
+    facet_wrap(~variable) +
+    theme_minimal() +
+    scale_color_brewer("", palette = "Set1") +
+    theme(panel.grid = element_blank(),
+          axis.text.x = element_text(angle = 90, hjust = 1)) +
+    ylab("Mean standardised score (SDs)") +
+    xlab("")
+
+  ggsave("plots/report/cfqr_means_all.pdf", device = "pdf", 
+         scale = 0.6, units = "cm", 
+         width = 33.87, height = 19.05, dpi = 600)
+
+
+```
+
+There were no discernible differences between arms in CFRSD symptom burden at +7 days, beyond an increase in the odds of relatively worse Reduced Activities, though all participants rated this item as Best or Ok. (Figure 4; S-Figure 7).
+
+```{r}
+
+  a <- filter(symp, visite == 2)
+  b <- filter(vsg, visite2 == "Enrollment" & intrial == "Yes") %>%
+    select(patient, centre, fevbl = fev1.pct.pred2, age., gender.)
+  c <- full_join(a, b, by = c("patient", "centre")) %>%
+    droplevels()
+  
+  tar <- names(select(c, Breathe:Miss_Work_School))
+  
+  ddist <- datadist(c)
+
+  options(datadist = "ddist")
+  
+  orm_models <- function(data, var_names, ...){
+    options(contrasts = c("contr.treatment", "contr.treatment"))
+    model_frame <- data_frame()
+    for(i in var_names){
+      form <- as.formula(paste0(i, "~ arm + fevbl + centre + gender. + age."))
+      m <- orm(form, data = c)
+      pval <- anova(m)
+      model_frame <- bind_rows(
+        data_frame(
+          quest = i,
+          var = gsub(paste0(i, "="), "", 
+                     names(m$coeff)[!grepl("y>=", names(m$coeff))]), 
+          logodds = m$coeff[!grepl("y>=", names(m$coeff))], 
+          se = sqrt(diag(m$var)[!grepl("y>=", names(diag(m$var)))]), 
+          or = exp(logodds),
+          ul = exp(logodds + 1.96*se),
+          ll = exp(logodds - 1.96*se), 
+          p_cat = cut(pval["arm", ][3], c(0, 0.001, 0.01, 0.05, 1), 
+                          include.lowest = TRUE)
+        ), 
+        model_frame
+      ) # %>% mutate(var = factor(var, levels = levs)) 
+    }
+    return(model_frame)
+  }
+  
+  orms <- orm_models(c, tar)
+  
+
+  options(contrasts = c("contr.treatment", "contr.poly")) # Normal settings
+```
+
+
+### Figure 4. Model-estimated differences in CFRSD symptom burden (from Best to Worst) at day +7, by trial arm
+```{r}
+  
+  filter(orms, var == "arm=Active") %>%
+    mutate(quest = reorder(quest, or)) %>%
+
+  ggplot(aes(x = quest, y = or, ymax = ul, ymin = ll)) +
+    geom_pointrange() +
+    geom_hline(yintercept = 1, linetype = "dashed") +
+    theme_minimal() +
+    ylab("OR (95% CI)") +
+    xlab("") +
+    coord_flip() +
+    theme(strip.text = element_text(size = 8))
+  
+```
+Note: Reported estimates of effect size are from ordered logistic regression models with adjustment for FEV1% at enrollment, centre, age, and sex. 
+
+### S-Figure 7. CFRSD symptom burden at +7 days, by arm.
+
+```{r}
+
+  filter(symp, visite == 2) %>%
+  gather(symptom, value, Breathe:Miss_Work_School) %>% 
+  filter(!is.na(value)) %>%
+  mutate(value = factor(value, levels = levels(factor(value))[c(5, 1, 3, 4, 2)])) %>%
+  ggplot(aes(x = arm, fill = value)) +
+    geom_bar(position = "fill") +
+    scale_fill_brewer("", palette = "Reds") +
+    facet_wrap(~symptom) +
+  theme(panel.grid = element_blank()) +
+  ylab("Proportion") +
+  xlab("") +
+  theme_minimal()
+
+
+  ggsave("plots/report/symp.pdf", device = "pdf", 
+         scale = 0.6, units = "cm", 
+         width = 33.87, height = 19.05, dpi = 600)
+```
+
+
